@@ -1,22 +1,41 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
 
-const char* ssid = "Alexis SET";
-const char* password = "09324473";
+// ------------------ WIFI ------------------
+const char* ssid = "TEC_EP_203";
+const char* password = "Tec_aula_203*";
+const char* serverUrl = "http://192.168.54.52:8000/api/iot/esp32/detect/";
+
 unsigned long lastRequestTime = 0;
-const unsigned long REQUEST_INTERVAL = 5000; // 5 segundos
+const unsigned long REQUEST_INTERVAL = 5000;
 
-// ⚠️ IP DEL BACKEND (correcta)
-const char* serverUrl = "http://192.168.0.106:8000/api/iot/esp32/detect/";
-
+// ------------------ HARDWARE ------------------
 #define LED_PIN 2
+
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
+
+// Ajustes para SG90
+#define SERVO_MIN  120   // Pulso mínimo
+#define SERVO_MAX  500   // Pulso máximo
+
+#define SERVO_ORGANICO   0   // Canal 0
+#define SERVO_INORGANICO 1   // Canal 1
 
 WiFiClient client;
 
+// ------------------ SETUP ------------------
 void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
+
+  Wire.begin(21, 22);
+  pwm.begin();
+  pwm.setPWMFreq(50); // 50Hz para servos
+
+  cerrarServos();
 
   Serial.print("🔌 Conectando WiFi");
   WiFi.begin(ssid, password);
@@ -30,78 +49,85 @@ void setup() {
   digitalWrite(LED_PIN, LOW);
 
   Serial.println("\n✅ WiFi conectado");
-  Serial.print("📡 IP ESP32: ");
+  Serial.print("📡 IP: ");
   Serial.println(WiFi.localIP());
-
-  enviarSolicitud();
 }
 
+// ------------------ LOOP ------------------
 void loop() {
-  unsigned long currentMillis = millis();
-
-  if (currentMillis - lastRequestTime >= REQUEST_INTERVAL) {
-    lastRequestTime = currentMillis;
+  if (millis() - lastRequestTime >= REQUEST_INTERVAL) {
+    lastRequestTime = millis();
     enviarSolicitud();
   }
 }
 
+// ------------------ BACKEND ------------------
 void enviarSolicitud() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("❌ WiFi desconectado");
-    return;
-  }
+  if (WiFi.status() != WL_CONNECTED) return;
 
   HTTPClient http;
-
-  Serial.println("📤 Enviando POST al backend...");
-  http.begin(client, serverUrl);  // 🔥 ESTA LÍNEA ES LA CLAVE
+  http.begin(client, serverUrl);
   http.addHeader("Content-Type", "application/json");
 
   String payload = "{\"tacho_id\":2}";
+  int httpCode = http.POST(payload);
 
-  int httpResponseCode = http.POST(payload);
-
-  Serial.print("📥 Código HTTP: ");
-  Serial.println(httpResponseCode);
-
-  if (httpResponseCode > 0) {
+  if (httpCode > 0) {
     String response = http.getString();
-    Serial.println("📩 Respuesta backend:");
+    Serial.println("📩 Respuesta:");
     Serial.println(response);
 
     StaticJsonDocument<256> doc;
-    DeserializationError error = deserializeJson(doc, response);
+    if (deserializeJson(doc, response)) return;
 
-    if (error) {
-      Serial.println("❌ Error parseando JSON");
-      http.end();
-      return;
-    }
-
-    int parpadeos = doc["parpadeos"] | 0;
-
-    Serial.print("💡 Parpadeos recibidos: ");
-    Serial.println(parpadeos);
-
-    parpadear(parpadeos);
-  } else {
-    Serial.println("❌ No se pudo conectar al backend");
+    int accion = doc["parpadeos"] | 0;
+    ejecutarAccion(accion);
   }
 
   http.end();
 }
 
-void parpadear(int veces) {
-  if (veces <= 0) return;
+// ------------------ ACCIONES ------------------
+void ejecutarAccion(int accion) {
+  switch (accion) {
+    case 1:
+      Serial.println("🟢 ORGÁNICO");
+      moverServo(SERVO_ORGANICO);
+      break;
 
-  Serial.print("🔁 Parpadeando ");
-  Serial.print(veces);
-  Serial.println(" veces");
+    case 2:
+      Serial.println("🔵 INORGÁNICO");
+      moverServo(SERVO_INORGANICO);
+      break;
 
+    case 3:
+      Serial.println("♻️ RECICLABLE");
+      parpadearLED(3);
+      break;
+
+    default:
+      break;
+  }
+}
+
+// ------------------ SERVOS ------------------
+void moverServo(uint8_t canal) {
+  pwm.setPWM(canal, 0, SERVO_MAX); // abrir
+  delay(2000);
+  pwm.setPWM(canal, 0, SERVO_MIN); // cerrar
+}
+
+void cerrarServos() {
+  pwm.setPWM(SERVO_ORGANICO, 0, SERVO_MIN);
+  pwm.setPWM(SERVO_INORGANICO, 0, SERVO_MIN);
+}
+
+// ------------------ LED ------------------
+void parpadearLED(int veces) {
   for (int i = 0; i < veces; i++) {
-    digitalWrite(LED_PIN, LOW);   // ✅ ENCIENDE LED
-    delay(500);
-    digitalWrite(LED_PIN, HIGH);  // ✅ APAGA LED
-    delay(500);
+    digitalWrite(LED_PIN, LOW);
+    delay(400);
+    digitalWrite(LED_PIN, HIGH);
+    delay(400);
   }
 }
