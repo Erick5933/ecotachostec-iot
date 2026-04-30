@@ -179,4 +179,4 @@ To change polling to push (WebSocket) instead of HTTP polling, replace the `loop
 
 ## Authors
 
-Built by Erick Chacón & Edwin Choez — Instituto Tecnológico del Azuay, Ecuador (2025–2026)
+Built by Erick Chacón & Edwin Choez, Ecuador (2025–2026)
